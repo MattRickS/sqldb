@@ -125,6 +125,8 @@ class SQLiteDatabase(object):
             fields.append(self.ID_FIELD)
             self._validate_fields(entity_type, fields)
 
+        fields.append("'{}' as type".format(entity_type))
+
         filter_string, values = filters_to_query(filters or [])
         sql = ["SELECT", ",".join(fields), "FROM", entity_type, filter_string]
 
