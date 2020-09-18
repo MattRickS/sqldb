@@ -99,6 +99,9 @@ class SQLiteDatabase(object):
         if not exists:
             self._initialise()
 
+    def __del__(self):
+        self._connection.close()
+
     def _initialise(self):
         pass
 
