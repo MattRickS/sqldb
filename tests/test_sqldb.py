@@ -68,7 +68,7 @@ def test_crud():
         os.remove("pytest.db")
 
 
-def test_example():
+def test_get_methods():
     PyTestDB.SQL_SCHEMA = """
     create table project (
         id          integer primary key autoincrement not null,

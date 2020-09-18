@@ -1,4 +1,5 @@
 import enum
+import functools
 import math
 import os
 import sqlite3
@@ -287,6 +288,7 @@ class SQLiteDatabase(object):
         rows = con.fetchall()
         return [dict(row) for row in rows]
 
+    @functools.lru_cache()
     def schema(self, entity_type):
         """
         Args:
