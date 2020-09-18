@@ -4,16 +4,16 @@ import sqlite3
 
 
 COMPARISON_MAP = {
-    "is": "=",
-    "is_not": "!=",
+    "eq": "=",
+    "ne": "!=",
     "in": "IN",
     "not_in": "NOT IN",
     "like": "LIKE",
     "unlike": "NOT LIKE",
-    "lesser": "<",
-    "lesser_or_is": "<=",
-    "greater": ">",
-    "greater_or_is": ">=",
+    "lt": "<",
+    "le": "<=",
+    "gt": ">",
+    "ge": ">=",
 }
 
 
@@ -116,8 +116,7 @@ class SQLiteDatabase(object):
             fields = ["*"]
         else:
             fields.append(self.ID_FIELD)
-
-        self._validate_fields(entity_type, fields)
+            self._validate_fields(entity_type, fields)
 
         filter_string, values = filters_to_query(filters or [])
         sql = ["SELECT", ",".join(fields), "FROM", entity_type, filter_string]
