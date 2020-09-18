@@ -114,6 +114,7 @@ class SQLiteDatabase(object):
     ):
         if not fields:
             fields = ["*"]
+            self._validate_table(entity_type)
         else:
             fields.append(self.ID_FIELD)
             self._validate_fields(entity_type, fields)
