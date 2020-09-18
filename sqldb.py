@@ -1,3 +1,4 @@
+import enum
 import math
 import os
 import sqlite3
@@ -15,6 +16,11 @@ COMPARISON_MAP = {
     "gt": ">",
     "ge": ">=",
 }
+
+
+class Order(enum.Enum):
+    Ascending = "ASC"
+    Descending = "DESC"
 
 
 class InvalidSchema(Exception):
@@ -200,8 +206,7 @@ class SQLiteDatabase(object):
             fields (list[str]): List of fields to limit the returned data to.
                 Must be fields that exist on the entity type. Default behaviour
                 is decided by the driver, but a minimum of the ID field is returned.
-            order (list[tuple[str, str]]): List of tuples for (field, direction)
-                where direction is either ASC of DESC.
+            order (list[tuple[str, str]]): List of tuples for (field, Order)
             limit (int): Maximum number of entities to be returned. If 0 (default),
                 all items are returned
             page (int): Page number to start querying from.
@@ -236,8 +241,7 @@ class SQLiteDatabase(object):
             fields (list[str]): List of fields to limit the returned data to.
                 Must be fields that exist on the entity type. Default behaviour
                 is decided by the driver, but a minimum of the ID field is returned.
-            order (list[tuple[str, str]]): List of tuples for (field, direction)
-                where direction is either ASC of DESC.
+            order (list[tuple[str, str]]): List of tuples for (field, Order)
 
         Returns:
             dict: A single database entry's fields
@@ -259,8 +263,7 @@ class SQLiteDatabase(object):
 
         Keyword Args:
             filters (list[dict]): Filters to reduce the number of entities queried
-            order (list[tuple[str, str]]): List of tuples for (field, direction)
-                where direction is either ASC of DESC.
+            order (list[tuple[str, str]]): List of tuples for (field, Order)
         Returns:
             list[dict]: List of unique combinations of values for the fields
                 from the entities matching the filters
