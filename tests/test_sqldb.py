@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 import sqldb
 
 
@@ -116,5 +118,27 @@ def test_get_methods():
 
         # Query the unique values for a set of fields in a column
         assert db.get_unique("user", ["age"]) == [{"age": 20}, {"age": 21}, {"age": 22}]
+    finally:
+        os.remove("pytest.db")
+
+
+def test_invalid_schema():
+    PyTestDB.SQL_SCHEMA = """
+    create table project (
+        id          integer primary key autoincrement not null,
+        name        text not null UNIQUE
+    );
+    """
+    db = PyTestDB("pytest.db")
+
+    try:
+        # Invalid table
+        with pytest.raises(sqldb.InvalidSchema):
+            db.get_one("company")
+
+        # Invalid field
+        with pytest.raises(sqldb.InvalidSchema):
+            db.get_one("project", fields=["address"])
+
     finally:
         os.remove("pytest.db")
