@@ -82,10 +82,10 @@ def get_max_pages(con, entity_type, filter_string, values, limit):
 
 
 class SQLiteDatabase(object):
-    ID_FIELD = "id"
-
-    def __init__(self, dbfile):
+    def __init__(self, dbfile, id_field="id"):
         self._filepath = dbfile
+        self._id_field = id_field
+
         exists = os.path.exists(self._filepath)
         self._connection = sqlite3.connect(
             self._filepath,
@@ -98,6 +98,10 @@ class SQLiteDatabase(object):
         # If this is the first time the file is created, load the schema
         if not exists:
             self._initialise()
+
+    @property
+    def filepath(self):
+        return self._filepath
 
     def __del__(self):
         self._connection.close()
@@ -126,7 +130,7 @@ class SQLiteDatabase(object):
             fields = ["*"]
             self._validate_table(entity_type)
         else:
-            fields.append(self.ID_FIELD)
+            fields.append(self._id_field)
             self._validate_fields(entity_type, fields)
 
         fields.append("'{}' as type".format(entity_type))
@@ -169,21 +173,15 @@ class SQLiteDatabase(object):
         self._validate_fields(entity_type, fields)
 
         fields, values = zip(*fields.items())
-        con = self._connection.cursor()
-        try:
-            con.execute(
+        with self._connection:
+            cursor = self._connection.execute(
                 "INSERT INTO {} ({}) VALUES ({});".format(
                     entity_type, ",".join(fields), ",".join("?" for _ in fields)
                 ),
                 values,
             )
-        except Exception:
-            self._connection.rollback()
-            raise
-        else:
-            self._connection.commit()
 
-        return con.lastrowid
+        return cursor.lastrowid
 
     def delete(self, entity_type, uid):
         """
@@ -197,7 +195,7 @@ class SQLiteDatabase(object):
         self._validate_table(entity_type)
         with self._connection:
             query = " ".join(
-                ("DELETE FROM", entity_type, "WHERE", self.ID_FIELD, "= ?;")
+                ("DELETE FROM", entity_type, "WHERE", self._id_field, "= ?;")
             )
             self._connection.execute(query, (uid,))
         return True
@@ -336,7 +334,7 @@ class SQLiteDatabase(object):
             "SET",
             ",".join(" ".join((col, "=", "?")) for col in columns),
             "WHERE",
-            self.ID_FIELD,
+            self._id_field,
             "= ?;",
         ]
         query = " ".join(sql)
