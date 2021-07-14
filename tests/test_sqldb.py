@@ -5,21 +5,13 @@ import pytest
 import sqldb
 
 
-class PyTestDB(sqldb.SQLiteDatabase):
-    SQL_SCHEMA = ""
-
-    def set_schema(self, sql):
-        with self._connection:
-            self._connection.executescript(sql)
-
-
 @pytest.fixture(scope="function")
 def db(tmpdir):
-    return PyTestDB(os.path.join(tmpdir, "sqldb.sqlite"))
+    return sqldb.SQLiteDatabase(os.path.join(tmpdir, "sqldb.sqlite"))
 
 
 def test_crud(db):
-    db.set_schema(
+    db._initialise(
         """
     create table project (
         id          integer primary key autoincrement not null,
@@ -74,7 +66,7 @@ def test_crud(db):
 
 
 def test_get_methods(db):
-    db.set_schema(
+    db._initialise(
         """
     create table project (
         id          integer primary key autoincrement not null,
@@ -123,7 +115,7 @@ def test_get_methods(db):
 
 
 def test_invalid_schema(db):
-    db.set_schema(
+    db._initialise(
         """
     create table project (
         id          integer primary key autoincrement not null,

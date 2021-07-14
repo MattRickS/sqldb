@@ -82,7 +82,16 @@ def get_max_pages(con, entity_type, filter_string, values, limit):
 
 
 class SQLiteDatabase(object):
-    def __init__(self, dbfile, id_field="id"):
+    def __init__(self, dbfile, sqlfile=None, id_field="id"):
+        """
+        Args:
+            dbfile (str): Path to the database file
+
+        Keyword Args:
+            sqlfile (str): Path to an sql file to load as the schema. Only used
+                if the database file does not already exist.
+            id_field (str): Name used for the id field on all tables.
+        """
         self._filepath = dbfile
         self._id_field = id_field
 
@@ -96,8 +105,9 @@ class SQLiteDatabase(object):
         self._connection.row_factory = sqlite3.Row
 
         # If this is the first time the file is created, load the schema
-        if not exists:
-            self._initialise()
+        if not exists and sqlfile:
+            with open(sqlfile) as f:
+                self._initialise(f.read())
 
     @property
     def filepath(self):
@@ -106,8 +116,9 @@ class SQLiteDatabase(object):
     def __del__(self):
         self._connection.close()
 
-    def _initialise(self):
-        pass
+    def _initialise(self, sql):
+        with self._connection:
+            self._connection.executescript(sql)
 
     def cursor(self):
         return self._connection.cursor()
