@@ -120,9 +120,6 @@ class SQLiteDatabase(object):
         with self._connection:
             self._connection.executescript(sql)
 
-    def cursor(self):
-        return self._connection.cursor()
-
     # ======================================================================== #
     # Entities
     # ======================================================================== #
