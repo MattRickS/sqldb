@@ -82,7 +82,7 @@ def get_max_pages(con, entity_type, filter_string, values, limit):
 
 
 class SQLiteDatabase(object):
-    def __init__(self, dbfile, sqlfile=None, id_field="id"):
+    def __init__(self, dbfile, sqlfile=None, id_field="id", log_callback=None):
         """
         Args:
             dbfile (str): Path to the database file
@@ -103,6 +103,9 @@ class SQLiteDatabase(object):
             isolation_level="IMMEDIATE",
         )
         self._connection.row_factory = sqlite3.Row
+
+        if log_callback is not None:
+            self._connection.set_trace_callback(log_callback)
 
         # If this is the first time the file is created, load the schema
         if not exists and sqlfile:
@@ -134,7 +137,7 @@ class SQLiteDatabase(object):
         limit=0,
         page=0,
     ):
-        if not fields:
+        if fields is None:
             fields = ["*"]
             self._validate_table(entity_type)
         else:
@@ -191,6 +194,29 @@ class SQLiteDatabase(object):
 
         return cursor.lastrowid
 
+    def createmany(self, entity_type, fields_list):
+        """
+        Creates multiple entries in one call, but does not return the uids
+
+        Args:
+            entity_type (str): Name of a database entity type
+            fields_list (list[dict]): List of field, value dictionaries
+        """
+        all_fields = {field for fields in fields_list for field in fields}
+        self._validate_fields(entity_type, all_fields)
+
+        columns = list(all_fields)
+        values = [tuple(fields.get(col) for col in columns) for fields in fields_list]
+        with self._connection:
+            self._connection.executemany(
+                "INSERT INTO {} ({}) VALUES ({});".format(
+                    entity_type,
+                    ",".join(columns),
+                    ",".join("?" for _ in columns),
+                ),
+                values,
+            )
+
     def delete(self, entity_type, uid):
         """
         Args:
@@ -206,6 +232,23 @@ class SQLiteDatabase(object):
                 ("DELETE FROM", entity_type, "WHERE", self._id_field, "= ?;")
             )
             self._connection.execute(query, (uid,))
+        return True
+
+    def deletemany(self, entity_type, uids):
+        """
+        Args:
+            entity_type (str): Name of a database entity type
+            uids (list[int]): List of unique identifiers to be deleted
+
+        Returns:
+            bool: Whether or not the operation was successful
+        """
+        self._validate_table(entity_type)
+        with self._connection:
+            query = " ".join(
+                ("DELETE FROM", entity_type, "WHERE", self._id_field, "= ?;")
+            )
+            self._connection.executemany(query, [(uid,) for uid in uids])
         return True
 
     def get(self, entity_type, filters=None, fields=None, order=None, limit=0, page=0):
@@ -348,6 +391,38 @@ class SQLiteDatabase(object):
         query = " ".join(sql)
         with self._connection:
             self._connection.execute(query, values + (uid,))
+        return True
+
+    def updatemany(self, entity_type, fields_list):
+        """
+        Args:
+            entity_type (str): Name of a database entity type
+            fields_list (list[dict]): List of field, value pair dictionaries to
+                update. All dictionaries must include the id field, and must be
+                updating the same fields.
+
+        Returns:
+            bool: Whether or not the operation was successful
+        """
+        columns = set(fields_list[0])
+        assert all(set(f) == columns for f in fields_list[1:])
+
+        # Make sure the id field is validated before discarding from updates
+        self._validate_fields(entity_type, columns)
+        columns.discard(self._id_field)
+
+        sql = [
+            "UPDATE",
+            entity_type,
+            "SET",
+            ",".join(" ".join((col, "=", f":{col}")) for col in columns),
+            "WHERE",
+            self._id_field,
+            f"= :{self._id_field};",
+        ]
+        query = " ".join(sql)
+        with self._connection:
+            self._connection.executemany(query, fields_list)
         return True
 
     # ======================================================================== #

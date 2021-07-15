@@ -7,7 +7,9 @@ import sqldb
 
 @pytest.fixture(scope="function")
 def db(tmpdir):
-    return sqldb.SQLiteDatabase(os.path.join(tmpdir, "sqldb.sqlite"))
+    return sqldb.SQLiteDatabase(
+        os.path.join(tmpdir, "sqldb.sqlite"), log_callback=print
+    )
 
 
 def test_crud(db):
@@ -63,6 +65,66 @@ def test_crud(db):
     result = db.delete("project", uid)
     assert result is True
     assert db.get_one("project") == {}
+
+
+def test_crudmany(db):
+    db._initialise(
+        """
+    create table project (
+        id          integer primary key autoincrement not null,
+        display     text not null,
+        name        text not null UNIQUE,
+        description text,
+        created     timestamp default current_timestamp,
+        creator     text not null
+    );
+    """
+    )
+
+    # Create
+    db.createmany(
+        "project",
+        [
+            {"name": "MyProject", "display": "My Project", "creator": "mshaw"},
+            {"name": "OtherProject", "display": "Other Project", "creator": "mshaw"},
+            {"name": "Something", "display": "Something", "creator": "mshaw"},
+        ],
+    )
+
+    # Updating
+    result = db.updatemany(
+        "project",
+        [
+            {"id": 1, "description": "Demonstrating the python DB wrapper"},
+            {"id": 2, "description": "Demonstrating the python DB wrapper"},
+        ],
+    )
+    assert result is True
+
+    # Read many
+    max_pages, projects = db.get("project", fields=["name", "description"])
+    assert max_pages == -1
+    assert projects == [
+        {
+            "type": "project",
+            "id": 1,
+            "name": "MyProject",
+            "description": "Demonstrating the python DB wrapper",
+        },
+        {
+            "type": "project",
+            "id": 2,
+            "name": "OtherProject",
+            "description": "Demonstrating the python DB wrapper",
+        },
+        {"type": "project", "id": 3, "name": "Something", "description": None},
+    ]
+
+    # Delete Many
+    result = db.deletemany("project", [2, 3])
+    assert result is True
+    _, projects = db.get("project", fields=[])
+    assert projects == [{"type": "project", "id": 1}]
 
 
 def test_get_methods(db):
