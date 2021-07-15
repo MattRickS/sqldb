@@ -72,15 +72,6 @@ def order_to_query(order):
     )
 
 
-def get_max_pages(con, entity_type, filter_string, values, limit):
-    count_sql = ["SELECT count(*) from", entity_type, filter_string]
-    query = " ".join(count_sql)
-    con.execute(query, values)
-    num_rows = con.fetchone()[0]
-    max_pages = int(math.ceil(num_rows / float(max(1, limit))))
-    return max_pages
-
-
 class SQLiteDatabase(object):
     def __init__(self, dbfile, sqlfile=None, id_field="id", log_callback=None):
         """
@@ -99,8 +90,6 @@ class SQLiteDatabase(object):
         self._connection = sqlite3.connect(
             self._filepath,
             detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-            # TODO: Test out the various levels, autocommit might be useful
-            isolation_level="IMMEDIATE",
         )
         self._connection.row_factory = sqlite3.Row
 
@@ -123,13 +112,38 @@ class SQLiteDatabase(object):
         with self._connection:
             self._connection.executescript(sql)
 
+    def _execute(self, query, values=(), many=False):
+        method = self._connection.executemany if many else self._connection.execute
+        if self._connection.in_transaction:
+            cursor = method(query, values)
+        else:
+            with self._connection:
+                cursor = method(query, values)
+        return cursor
+
+    def __enter__(self):
+        self._connection.execute("BEGIN IMMEDIATE")
+
+    def __exit__(self, exc_type, exc_value, tb):
+        if exc_type is None:
+            self._connection.execute("COMMIT")
+        else:
+            self._connection.execute("ROLLBACK")
+
     # ======================================================================== #
     # Entities
     # ======================================================================== #
 
+    def _get_max_pages(self, entity_type, filter_string, values, limit):
+        count_sql = ("SELECT count(*) from", entity_type, filter_string)
+        query = " ".join(count_sql)
+        cursor = self._connection.execute(query, values)
+        num_rows = cursor.fetchone()[0]
+        max_pages = int(math.ceil(num_rows / float(max(1, limit))))
+        return max_pages
+
     def _get(
         self,
-        connection,
         entity_type,
         filters=None,
         fields=None,
@@ -155,9 +169,7 @@ class SQLiteDatabase(object):
         if limit:
             # If paginating the results, query the total number of rows that
             # match the filter criteria to determine the maximum number of pages
-            max_pages = get_max_pages(
-                connection, entity_type, filter_string, values, limit
-            )
+            max_pages = self._get_max_pages(entity_type, filter_string, values, limit)
 
             # Only extend the values after the total rows query
             sql.extend(["LIMIT", "?,?"])
@@ -168,9 +180,9 @@ class SQLiteDatabase(object):
             max_pages = -1
 
         query = " ".join(sql) + ";"
-        connection.execute(query, values)
+        cursor = self._connection.execute(query, values)
 
-        return max_pages
+        return cursor, max_pages
 
     def create(self, entity_type, fields):
         """
@@ -184,13 +196,10 @@ class SQLiteDatabase(object):
         self._validate_fields(entity_type, fields)
 
         fields, values = zip(*fields.items())
-        with self._connection:
-            cursor = self._connection.execute(
-                "INSERT INTO {} ({}) VALUES ({});".format(
-                    entity_type, ",".join(fields), ",".join("?" for _ in fields)
-                ),
-                values,
-            )
+        query = "INSERT INTO {} ({}) VALUES ({});".format(
+            entity_type, ",".join(fields), ",".join("?" for _ in fields)
+        )
+        cursor = self._execute(query, values)
 
         return cursor.lastrowid
 
@@ -207,15 +216,12 @@ class SQLiteDatabase(object):
 
         columns = list(all_fields)
         values = [tuple(fields.get(col) for col in columns) for fields in fields_list]
-        with self._connection:
-            self._connection.executemany(
-                "INSERT INTO {} ({}) VALUES ({});".format(
-                    entity_type,
-                    ",".join(columns),
-                    ",".join("?" for _ in columns),
-                ),
-                values,
-            )
+        query = "INSERT INTO {} ({}) VALUES ({});".format(
+            entity_type,
+            ",".join(columns),
+            ",".join("?" for _ in columns),
+        )
+        self._execute(query, values, many=True)
 
     def delete(self, entity_type, uid):
         """
@@ -227,11 +233,8 @@ class SQLiteDatabase(object):
             bool: Whether or not the operation was successful
         """
         self._validate_table(entity_type)
-        with self._connection:
-            query = " ".join(
-                ("DELETE FROM", entity_type, "WHERE", self._id_field, "= ?;")
-            )
-            self._connection.execute(query, (uid,))
+        query = " ".join(("DELETE FROM", entity_type, "WHERE", self._id_field, "= ?;"))
+        self._execute(query, (uid,))
         return True
 
     def deletemany(self, entity_type, uids):
@@ -244,11 +247,8 @@ class SQLiteDatabase(object):
             bool: Whether or not the operation was successful
         """
         self._validate_table(entity_type)
-        with self._connection:
-            query = " ".join(
-                ("DELETE FROM", entity_type, "WHERE", self._id_field, "= ?;")
-            )
-            self._connection.executemany(query, [(uid,) for uid in uids])
+        query = " ".join(("DELETE FROM", entity_type, "WHERE", self._id_field, "= ?;"))
+        self._execute(query, [(uid,) for uid in uids], many=True)
         return True
 
     def get(self, entity_type, filters=None, fields=None, order=None, limit=0, page=0):
@@ -272,9 +272,7 @@ class SQLiteDatabase(object):
                 List of field dictionaries matching the filters,
             )
         """
-        con = self._connection.cursor()
-        max_pages = self._get(
-            con,
+        cursor, max_pages = self._get(
             entity_type,
             filters=filters,
             fields=fields,
@@ -282,7 +280,7 @@ class SQLiteDatabase(object):
             limit=limit,
             page=page,
         )
-        rows = con.fetchall()
+        rows = cursor.fetchall()
         dict_rows = [dict(row) for row in rows]
         return max_pages, dict_rows
 
@@ -301,9 +299,8 @@ class SQLiteDatabase(object):
         Returns:
             dict: A single database entry's fields
         """
-        con = self._connection.cursor()
-        self._get(con, entity_type, filters=filters, fields=fields, order=order)
-        row = con.fetchone()
+        cursor, _ = self._get(entity_type, filters=filters, fields=fields, order=order)
+        row = cursor.fetchone()
         if not row:
             return {}
 
@@ -335,9 +332,8 @@ class SQLiteDatabase(object):
             order_to_query(order),
         ]
         query = " ".join(sql)
-        con = self._connection.cursor()
-        con.execute(query, values)
-        rows = con.fetchall()
+        cursor = self._connection.execute(query, values)
+        rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
     @functools.lru_cache()
@@ -389,8 +385,7 @@ class SQLiteDatabase(object):
             "= ?;",
         ]
         query = " ".join(sql)
-        with self._connection:
-            self._connection.execute(query, values + (uid,))
+        self._execute(query, values + (uid,))
         return True
 
     def updatemany(self, entity_type, fields_list):
@@ -421,8 +416,7 @@ class SQLiteDatabase(object):
             f"= :{self._id_field};",
         ]
         query = " ".join(sql)
-        with self._connection:
-            self._connection.executemany(query, fields_list)
+        self._execute(query, fields_list, many=True)
         return True
 
     # ======================================================================== #

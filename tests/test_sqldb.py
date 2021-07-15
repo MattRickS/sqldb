@@ -1,3 +1,4 @@
+import sqlite3
 import pytest
 
 import sqldb
@@ -189,3 +190,49 @@ def test_invalid_schema(db: sqldb.SQLiteDatabase):
     # Invalid field
     with pytest.raises(sqldb.InvalidSchema):
         db.get_one("project", fields=["address"])
+
+
+def test_transactions(db: sqldb.SQLiteDatabase):
+    db._initialise(
+        """
+        create table project (
+            id          integer primary key autoincrement not null,
+            name        text not null UNIQUE
+        );
+        """
+    )
+
+    db.create("project", {"name": "one"})
+    assert db.get_one("project") == {"type": "project", "name": "one", "id": 1}
+    assert not db._connection.in_transaction
+
+    with db:
+        db.create("project", {"name": "two"})
+        # Should still be in a transaction, but able to read the current modified state
+        assert db._connection.in_transaction
+        assert db.get("project")[1] == [
+            {"type": "project", "name": "one", "id": 1},
+            {"type": "project", "name": "two", "id": 2},
+        ]
+
+        db.create("project", {"name": "three"})
+
+    # Transaction should be completed and all data committed
+    assert not db._connection.in_transaction
+    assert db.get("project")[1] == [
+        {"type": "project", "name": "one", "id": 1},
+        {"type": "project", "name": "two", "id": 2},
+        {"type": "project", "name": "three", "id": 3},
+    ]
+
+    try:
+        with db:
+            db.update("project", 2, {"name": "four"})
+            assert db.get_one("project", filters=[{"eq": {"id": 2}}])["name"] == "four"
+            # Violates uniqueness constraint, will raise an error
+            db.create("project", {"name": "one"})
+    except sqlite3.IntegrityError as e:
+        assert str(e) == "UNIQUE constraint failed: project.name"
+
+    # The update should have been rolled back and not committed
+    assert db.get_one("project", filters=[{"eq": {"id": 2}}])["name"] == "two"
