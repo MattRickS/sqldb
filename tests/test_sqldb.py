@@ -1,18 +1,14 @@
-import os
-
 import pytest
 
 import sqldb
 
 
 @pytest.fixture(scope="function")
-def db(tmpdir):
-    return sqldb.SQLiteDatabase(
-        os.path.join(tmpdir, "sqldb.sqlite"), log_callback=print
-    )
+def db():
+    return sqldb.SQLiteDatabase(":memory:", log_callback=print)
 
 
-def test_crud(db):
+def test_crud(db: sqldb.SQLiteDatabase):
     db._initialise(
         """
     create table project (
@@ -67,7 +63,7 @@ def test_crud(db):
     assert db.get_one("project") == {}
 
 
-def test_crudmany(db):
+def test_crudmany(db: sqldb.SQLiteDatabase):
     db._initialise(
         """
     create table project (
@@ -127,7 +123,7 @@ def test_crudmany(db):
     assert projects == [{"type": "project", "id": 1}]
 
 
-def test_get_methods(db):
+def test_get_methods(db: sqldb.SQLiteDatabase):
     db._initialise(
         """
     create table project (
@@ -176,7 +172,7 @@ def test_get_methods(db):
     assert db.get_unique("user", ["age"]) == [{"age": 20}, {"age": 21}, {"age": 22}]
 
 
-def test_invalid_schema(db):
+def test_invalid_schema(db: sqldb.SQLiteDatabase):
     db._initialise(
         """
     create table project (
