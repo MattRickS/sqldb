@@ -178,36 +178,44 @@ class SQLiteDatabase(object):
         fields.append(f"'{table}' as type")
         return fields
 
-    def _build_joins(self, table_path, join_data, query_fields):
-        prev_table = table_path[-1]
-        table = join_data["table"]
-        src_field = join_data.get("src_field", self._id_field)
-        dst_field = prev_table + "." + join_data.get("dst_field", f"{table}_id")
-        join_strings = [f"JOIN {table} ON {table}.{src_field} = {dst_field}"]
+    def _build_joins(self, table_path, joins, query_fields):
+        filter_strings = []
+        filter_values = []
+        join_strings = []
 
-        conditions = join_data.get("conditions", [])
-        filter_string, values = filters_to_query(conditions)
+        for join_data in joins:
+            prev_table = table_path[-1]
+            table = join_data["table"]
+            src_field = join_data.get("src_field", self._id_field)
+            dst_field = prev_table + "." + join_data.get("dst_field", f"{table}_id")
+            join_strings.append(f"JOIN {table} ON {table}.{src_field} = {dst_field}")
 
-        path = table_path + (table,)
-        query_fields[path] = self._fields(table, join_data.get("fields"))
-        # The joined field is removed - this is assuming it's an id field, may
-        # not be desirable.
-        try:
-            query_fields[table_path].remove(dst_field)
-        except ValueError:
-            pass
+            conditions = join_data.get("conditions", [])
+            filter_string, values = filters_to_query(conditions)
+            if filter_string:
+                filter_strings.append(filter_string)
+                filter_values.extend(values)
 
-        subjoins = join_data.get("joins")
-        if subjoins:
-            sub_join, sub_filter, sub_values = self._build_joins(
-                path, subjoins, query_fields
-            )
-            join_strings.extend(sub_join)
-            if sub_filter:
-                filter_string += " AND " + sub_filter
-                values.extend(sub_values)
+            path = table_path + (table,)
+            query_fields[path] = self._fields(table, join_data.get("fields"))
+            # The joined field is removed - this is assuming it's an id field, may
+            # not be desirable.
+            try:
+                query_fields[table_path].remove(dst_field)
+            except ValueError:
+                pass
 
-        return join_strings, filter_string, values
+            subjoins = join_data.get("joins")
+            if subjoins:
+                sub_join, sub_filters, sub_values = self._build_joins(
+                    path, subjoins, query_fields
+                )
+                join_strings.extend(sub_join)
+                if sub_filters:
+                    filter_strings.extend(sub_filters)
+                    filter_values.extend(sub_values)
+
+        return join_strings, filter_strings, filter_values
 
     def _row(self, row, query_fields):
         i = 0
@@ -249,13 +257,13 @@ class SQLiteDatabase(object):
         sql = ["SELECT", "FROM", table]
         filter_string, values = filters_to_query(filters or [])
 
-        for join_data in joins or ():
+        if joins:
             join_strings, join_filters, join_values = self._build_joins(
-                table_path, join_data, query_fields
+                table_path, joins, query_fields
             )
             sql.extend(join_strings)
             if join_filters:
-                filter_string += " AND " + join_filters
+                filter_string += " AND ".join(join_filters)
                 values.extend(join_values)
 
         sql.insert(

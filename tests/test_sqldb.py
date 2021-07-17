@@ -273,7 +273,6 @@ def test_joins(db: sqldb.SQLiteDatabase):
         "task", {"name": "fix it", "assignee": person_id, "project_id": project_id}
     )
 
-    # TODO: sub joins should be a list as well
     row = db.get_one(
         "task",
         joins=[
@@ -281,7 +280,7 @@ def test_joins(db: sqldb.SQLiteDatabase):
             {
                 "table": "person",
                 "dst_field": "assignee",
-                "joins": {"table": "department"},
+                "joins": [{"table": "department"}],
             },
         ],
     )
