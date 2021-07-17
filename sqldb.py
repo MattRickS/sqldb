@@ -29,7 +29,7 @@ class InvalidSchema(Exception):
     pass
 
 
-def filters_to_query(filters):
+def filters_to_query(table, filters):
     if not filters:
         return "", []
 
@@ -48,7 +48,7 @@ def filters_to_query(filters):
                 else:
                     placeholder = "?"
                     values.append(value)
-                filter_option.extend([field, key, placeholder, "AND"])
+                filter_option.extend([f"{table}.{field}", key, placeholder, "AND"])
 
         # Remove the last "AND" from the filters before joining
         if filter_option:
@@ -191,7 +191,7 @@ class SQLiteDatabase(object):
             join_strings.append(f"JOIN {table} ON {table}.{dst_field} = {src_field}")
 
             conditions = join_data.get("conditions", [])
-            filter_string, values = filters_to_query(conditions)
+            filter_string, values = filters_to_query(table, conditions)
             if filter_string:
                 filter_strings.append(filter_string)
                 filter_values.extend(values)
@@ -255,7 +255,7 @@ class SQLiteDatabase(object):
         query_fields[table_path] = self._fields(table, fields)
 
         sql = ["SELECT", "FROM", table]
-        filter_string, values = filters_to_query(filters or [])
+        filter_string, values = filters_to_query(table, filters or [])
 
         if joins:
             join_strings, join_filters, join_values = self._build_joins(
@@ -445,7 +445,7 @@ class SQLiteDatabase(object):
             table,
             order_to_query(order),
         ]
-        filter_string, values = filters_to_query(filters or [])
+        filter_string, values = filters_to_query(table, filters or [])
         if filter_string:
             sql[-2:-2] = ["WHERE", filter_string]
 

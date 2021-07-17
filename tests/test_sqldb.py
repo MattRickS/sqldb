@@ -269,12 +269,17 @@ def test_joins(db: sqldb.SQLiteDatabase):
     project_id = db.create("project", {"name": "MyProject"})
     department_id = db.create("department", {"name": "DepartmentA"})
     person_id = db.create("person", {"name": "mshaw", "department_id": department_id})
+    db.create(
+        "task", {"name": "junk task", "assignee": person_id, "project_id": project_id}
+    )
     task_id = db.create(
-        "task", {"name": "fix it", "assignee": person_id, "project_id": project_id}
+        "task",
+        {"name": "fix it", "assignee": person_id, "project_id": project_id},
     )
 
     row = db.get_one(
         "task",
+        filters=[{"eq": {"id": task_id}}],
         joins=[
             {"table": "project"},
             {
