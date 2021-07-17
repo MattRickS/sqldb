@@ -79,12 +79,12 @@ class SQLiteDatabase(object):
 
         Provides CRUD methods (one and many) for tables using a custom filter
         syntax and schema validation to prevent injection attacks. The
-        SQLiteDatabase can be used as a context manager so that all methods
+        transaction method can be used as a context manager so that all methods
         called within the context are placed into a transaction, eg
 
             db = SQLiteDatabase(":memory:")
             # Transaction start
-            with db:
+            with db.transaction():
                 db.create("table1", {"name": "one"})
                 db.create("table1", {"name": "two"})
             # Transaction end
@@ -147,6 +147,10 @@ class SQLiteDatabase(object):
             self._connection.execute("COMMIT")
         else:
             self._connection.execute("ROLLBACK")
+
+    def transaction(self):
+        """ Returns a context manager where all methods become a single transaction """
+        return self
 
     # ======================================================================== #
     # CRUD

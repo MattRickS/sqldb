@@ -206,7 +206,7 @@ def test_transactions(db: sqldb.SQLiteDatabase):
     assert db.get_one("project") == {"type": "project", "name": "one", "id": 1}
     assert not db._connection.in_transaction
 
-    with db:
+    with db.transaction():
         db.create("project", {"name": "two"})
         # Should still be in a transaction, but able to read the current modified state
         assert db._connection.in_transaction
@@ -226,7 +226,7 @@ def test_transactions(db: sqldb.SQLiteDatabase):
     ]
 
     try:
-        with db:
+        with db.transaction():
             db.update("project", 2, {"name": "four"})
             assert db.get_one("project", filters=[{"eq": {"id": 2}}])["name"] == "four"
             # Violates uniqueness constraint, will raise an error
