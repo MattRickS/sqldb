@@ -279,7 +279,7 @@ def test_joins(db: sqldb.SQLiteDatabase):
             {"table": "project"},
             {
                 "table": "person",
-                "dst_field": "assignee",
+                "src_field": "assignee",
                 "joins": [{"table": "department"}],
             },
         ],

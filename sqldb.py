@@ -186,9 +186,9 @@ class SQLiteDatabase(object):
         for join_data in joins:
             prev_table = table_path[-1]
             table = join_data["table"]
-            src_field = join_data.get("src_field", self._id_field)
-            dst_field = prev_table + "." + join_data.get("dst_field", f"{table}_id")
-            join_strings.append(f"JOIN {table} ON {table}.{src_field} = {dst_field}")
+            dst_field = join_data.get("dst_field", self._id_field)
+            src_field = prev_table + "." + join_data.get("src_field", f"{table}_id")
+            join_strings.append(f"JOIN {table} ON {table}.{dst_field} = {src_field}")
 
             conditions = join_data.get("conditions", [])
             filter_string, values = filters_to_query(conditions)
@@ -201,7 +201,7 @@ class SQLiteDatabase(object):
             # The joined field is removed - this is assuming it's an id field, may
             # not be desirable.
             try:
-                query_fields[table_path].remove(dst_field)
+                query_fields[table_path].remove(src_field)
             except ValueError:
                 pass
 
