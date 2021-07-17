@@ -236,3 +236,44 @@ def test_transactions(db: sqldb.SQLiteDatabase):
 
     # The update should have been rolled back and not committed
     assert db.get_one("project", filters=[{"eq": {"id": 2}}])["name"] == "two"
+
+
+def test_joins(db: sqldb.SQLiteDatabase):
+    db._initialise(
+        """
+        create table project (
+            id          integer primary key autoincrement not null,
+            name        text
+        );
+        create table department (
+            id          integer primary key autoincrement not null,
+            name        text
+        );
+        create table person (
+            id          integer primary key autoincrement not null,
+            name        text,
+            project_id  integer,
+            department_id    integer
+        );
+        """
+    )
+
+    project_id = db.create("project", {"name": "MyProject"})
+    department_id = db.create("department", {"name": "DepartmentA"})
+    person_id = db.create(
+        "person",
+        {"name": "mshaw", "project_id": project_id, "department_id": department_id},
+    )
+
+    row = db.get_one("person", joins=[{"table": "project"}, {"table": "department"}])
+    assert row == {
+        "type": "person",
+        "id": person_id,
+        "name": "mshaw",
+        "project": {"type": "project", "id": project_id, "name": "MyProject"},
+        "department": {
+            "type": "department",
+            "id": department_id,
+            "name": "DepartmentA",
+        },
+    }

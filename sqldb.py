@@ -54,9 +54,9 @@ def filters_to_query(filters):
             filter_option.pop(-1)
             filter_list.append("({})".format(" ".join(filter_option)))
 
-    filter_sql = ["WHERE", " OR ".join(filter_list)]
-    filter_string = " ".join(filter_sql)
-    return filter_string, values
+    filter_string = " OR ".join(filter_list)
+    # Ensure the result is bracketed to prevent issues with multiple filter strings
+    return (f"({filter_string})" if filter_string else ""), values
 
 
 def order_to_query(order):
@@ -157,6 +157,7 @@ class SQLiteDatabase(object):
     # ======================================================================== #
 
     def _get_max_pages(self, table, filter_string, values, limit):
+        # TODO: Replace with page token
         count_sql = ("SELECT count(*) from", table, filter_string)
         query = " ".join(count_sql)
         cursor = self._connection.execute(query, values)
@@ -164,15 +165,7 @@ class SQLiteDatabase(object):
         max_pages = int(math.ceil(num_rows / float(max(1, limit))))
         return max_pages
 
-    def _get(
-        self,
-        table,
-        filters=None,
-        fields=None,
-        order=None,
-        limit=0,
-        page=0,
-    ):
+    def _fields(self, table, fields):
         if fields is None:
             fields = ["*"]
             self._validate_table(table)
@@ -180,10 +173,74 @@ class SQLiteDatabase(object):
             fields.append(self._id_field)
             self._validate_fields(table, fields)
 
-        fields.append("'{}' as type".format(table))
+        fields = [f"{table}.{f}" for f in fields]
+        fields.append(f"'{table}' as type")
+        return fields
 
+    def _build_joins(self, prev_table, join_data):
+        table = join_data["table"]
+        src_field = join_data.get("src_field", self._id_field)
+        dst_field = join_data.get("dst_field", f"{table}_id")
+        join_strings = [
+            f"JOIN {table} ON {table}.{src_field} = {prev_table}.{dst_field}"
+        ]
+
+        conditions = join_data.get("conditions", [])
+        filter_string, values = filters_to_query(conditions)
+
+        fields_list = [self._fields(table, join_data.get("fields"))]
+        strip_fields = {prev_table: [dst_field]}
+
+        subjoins = join_data.get("joins")
+        if subjoins:
+            sub_join, sub_fields, sub_strip, sub_filter, sub_values = self._build_joins(
+                table, subjoins
+            )
+            join_strings.append(sub_join)
+            fields_list.append(sub_fields)
+            filter_string += " AND " + sub_filter
+            values.extend(sub_values)
+            for k, v in sub_strip.items():
+                strip_fields.setdefault(k, []).extend(v)
+
+        return join_strings, fields_list, strip_fields, filter_string, values
+
+    def _get(
+        self,
+        table,
+        filters=None,
+        fields=None,
+        joins=None,
+        order=None,
+        limit=0,
+        page=0,
+    ):
+        fields_list = [self._fields(table, fields)]
+
+        sql = ["SELECT", "FROM", table]
         filter_string, values = filters_to_query(filters or [])
-        sql = ["SELECT", ",".join(fields), "FROM", table, filter_string]
+
+        strip_fields = {}
+        for join_data in joins or ():
+            (
+                join_strings,
+                join_fields,
+                join_strip,
+                join_filters,
+                join_values,
+            ) = self._build_joins(table, join_data)
+            sql.extend(join_strings)
+            fields_list.extend(join_fields)
+            for k, v in join_strip.items():
+                strip_fields.setdefault(k, []).extend(v)
+            if join_filters:
+                filter_string += " AND " + join_filters
+                values.extend(join_values)
+
+        sql.insert(1, ",".join(f for fields in fields_list for f in fields))
+
+        if filter_string:
+            sql.extend(("WHERE", filter_string))
 
         if order:
             sql.append(order_to_query(order))
@@ -204,7 +261,7 @@ class SQLiteDatabase(object):
         query = " ".join(sql) + ";"
         cursor = self._connection.execute(query, values)
 
-        return cursor, max_pages
+        return cursor, fields_list, strip_fields, max_pages
 
     def create(self, table, fields):
         """
@@ -273,7 +330,37 @@ class SQLiteDatabase(object):
         self._execute(query, [(uid,) for uid in uids], many=True)
         return True
 
-    def get(self, table, filters=None, fields=None, order=None, limit=0, page=0):
+    def _row(self, row, fields_list, strip_fields):
+        i = 0
+        result = None
+        for fields in fields_list:
+            # Last field is always the table as type
+            table = fields.pop(-1).split(maxsplit=1)[0][1:-1]
+            fields = [f.rsplit(".", 1)[-1] for f in fields]
+
+            if "*" in fields:
+                fields = list(self.schema(table))
+
+            fields.append("type")
+            j = i + len(fields)
+
+            values = dict(zip(fields, row[i:j]))
+
+            for k in strip_fields.get(table, ()):
+                values.pop(k, None)
+
+            i = j
+
+            if result is None:
+                result = values
+            else:
+                result[table] = values
+
+        return result
+
+    def get(
+        self, table, filters=None, fields=None, joins=None, order=None, limit=0, page=0
+    ):
         """
         Args:
             table (str): Name of a database table
@@ -294,19 +381,20 @@ class SQLiteDatabase(object):
                 List of field dictionaries matching the filters,
             )
         """
-        cursor, max_pages = self._get(
+        cursor, fields_list, strip_fields, max_pages = self._get(
             table,
             filters=filters,
             fields=fields,
+            joins=joins,
             order=order,
             limit=limit,
             page=page,
         )
         rows = cursor.fetchall()
-        dict_rows = [dict(row) for row in rows]
+        dict_rows = [self._row(row, fields_list, strip_fields) for row in rows]
         return max_pages, dict_rows
 
-    def get_one(self, table, filters=None, fields=None, order=None):
+    def get_one(self, table, filters=None, fields=None, joins=None, order=None):
         """
         Args:
             table (str): Name of a database table
@@ -321,12 +409,14 @@ class SQLiteDatabase(object):
         Returns:
             dict: A single database entry's fields
         """
-        cursor, _ = self._get(table, filters=filters, fields=fields, order=order)
+        cursor, fields_list, strip_fields, _ = self._get(
+            table, filters=filters, fields=fields, joins=joins, order=order
+        )
         row = cursor.fetchone()
         if not row:
             return {}
 
-        dict_row = dict(row)
+        dict_row = self._row(row, fields_list, strip_fields)
         return dict_row
 
     def get_unique(self, table, fields, filters=None, order=None):
@@ -344,15 +434,17 @@ class SQLiteDatabase(object):
         """
         self._validate_fields(table, fields)
 
-        filter_string, values = filters_to_query(filters or [])
         sql = [
             "SELECT DISTINCT",
             ",".join(fields),
             "FROM",
             table,
-            filter_string,
             order_to_query(order),
         ]
+        filter_string, values = filters_to_query(filters or [])
+        if filter_string:
+            sql[-2:-2] = ["WHERE", filter_string]
+
         query = " ".join(sql)
         cursor = self._connection.execute(query, values)
         rows = cursor.fetchall()
@@ -379,7 +471,7 @@ class SQLiteDatabase(object):
         self._validate_table(table)
 
         cur = self._connection.cursor()
-        columns = cur.execute("PRAGMA table_info('{}')".format(table)).fetchall()
+        columns = cur.execute(f"PRAGMA table_info('{table}')").fetchall()
         schema = {row[1]: {"type": row[2]} for row in columns}
         return schema
 
@@ -448,9 +540,7 @@ class SQLiteDatabase(object):
         schema = self.schema(table)
         invalid = set(fields).difference(schema)
         if invalid:
-            raise InvalidSchema(
-                "Invalid field(s) for {}: {}".format(table, list(invalid))
-            )
+            raise InvalidSchema(f"Invalid field(s) for {table}: {list(invalid)}")
 
     def _validate_table(self, table):
         cur = self._connection.cursor()
@@ -459,4 +549,4 @@ class SQLiteDatabase(object):
             (table,),
         ).fetchone()
         if not row:
-            raise InvalidSchema("Invalid table: {}".format(table))
+            raise InvalidSchema(f"Invalid table: {table}")
