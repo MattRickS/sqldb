@@ -252,28 +252,52 @@ def test_joins(db: sqldb.SQLiteDatabase):
         create table person (
             id          integer primary key autoincrement not null,
             name        text,
-            project_id  integer,
             department_id    integer
+        );
+        create table task (
+            id          integer primary key autoincrement not null,
+            name        text,
+            project_id  integer,
+            assignee    integer
         );
         """
     )
 
+    # TODO: Multi-joins. For one to many this would return multiple rows that
+    # should be combined. The concept of `get_one` may want to understand this
+    # and return the list of joined rows.
     project_id = db.create("project", {"name": "MyProject"})
     department_id = db.create("department", {"name": "DepartmentA"})
-    person_id = db.create(
-        "person",
-        {"name": "mshaw", "project_id": project_id, "department_id": department_id},
+    person_id = db.create("person", {"name": "mshaw", "department_id": department_id})
+    task_id = db.create(
+        "task", {"name": "fix it", "assignee": person_id, "project_id": project_id}
     )
 
-    row = db.get_one("person", joins=[{"table": "project"}, {"table": "department"}])
+    # TODO: sub joins should be a list as well
+    row = db.get_one(
+        "task",
+        joins=[
+            {"table": "project"},
+            {
+                "table": "person",
+                "dst_field": "assignee",
+                "joins": {"table": "department"},
+            },
+        ],
+    )
     assert row == {
-        "type": "person",
-        "id": person_id,
-        "name": "mshaw",
+        "type": "task",
+        "id": task_id,
+        "name": "fix it",
         "project": {"type": "project", "id": project_id, "name": "MyProject"},
-        "department": {
-            "type": "department",
-            "id": department_id,
-            "name": "DepartmentA",
+        "person": {
+            "type": "person",
+            "id": person_id,
+            "name": "mshaw",
+            "department": {
+                "type": "department",
+                "id": department_id,
+                "name": "DepartmentA",
+            },
         },
     }

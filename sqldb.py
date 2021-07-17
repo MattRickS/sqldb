@@ -178,7 +178,8 @@ class SQLiteDatabase(object):
         fields.append(f"'{table}' as type")
         return fields
 
-    def _build_joins(self, prev_table, join_data, query_fields):
+    def _build_joins(self, table_path, join_data, query_fields):
+        prev_table = table_path[-1]
         table = join_data["table"]
         src_field = join_data.get("src_field", self._id_field)
         dst_field = prev_table + "." + join_data.get("dst_field", f"{table}_id")
@@ -187,29 +188,31 @@ class SQLiteDatabase(object):
         conditions = join_data.get("conditions", [])
         filter_string, values = filters_to_query(conditions)
 
-        query_fields[table] = self._fields(table, join_data.get("fields"))
+        path = table_path + (table,)
+        query_fields[path] = self._fields(table, join_data.get("fields"))
         # The joined field is removed - this is assuming it's an id field, may
         # not be desirable.
         try:
-            query_fields[prev_table].remove(dst_field)
+            query_fields[table_path].remove(dst_field)
         except ValueError:
             pass
 
         subjoins = join_data.get("joins")
         if subjoins:
             sub_join, sub_filter, sub_values = self._build_joins(
-                table, subjoins, query_fields
+                path, subjoins, query_fields
             )
-            join_strings.append(sub_join)
-            filter_string += " AND " + sub_filter
-            values.extend(sub_values)
+            join_strings.extend(sub_join)
+            if sub_filter:
+                filter_string += " AND " + sub_filter
+                values.extend(sub_values)
 
         return join_strings, filter_string, values
 
     def _row(self, row, query_fields):
         i = 0
         result = None
-        for table, fields in query_fields.items():
+        for table_path, fields in query_fields.items():
             # Last field is always: 'table' as type
             fields = [f.rsplit(".", 1)[-1] for f in fields[:-1]]
             fields.append("type")
@@ -221,7 +224,11 @@ class SQLiteDatabase(object):
             if result is None:
                 result = values
             else:
-                result[table] = values
+                # First table is the root, and can be ignored
+                temp = result
+                for table in table_path[1:-1]:
+                    temp = temp[table]
+                temp[table_path[-1]] = values
 
         return result
 
@@ -235,15 +242,16 @@ class SQLiteDatabase(object):
         limit=0,
         page=0,
     ):
+        table_path = (table,)
         query_fields = collections.OrderedDict()
-        query_fields[table] = self._fields(table, fields)
+        query_fields[table_path] = self._fields(table, fields)
 
         sql = ["SELECT", "FROM", table]
         filter_string, values = filters_to_query(filters or [])
 
         for join_data in joins or ():
             join_strings, join_filters, join_values = self._build_joins(
-                table, join_data, query_fields
+                table_path, join_data, query_fields
             )
             sql.extend(join_strings)
             if join_filters:
